@@ -270,7 +270,8 @@ class ProgressWindow(base.Window):
              DeleteButton(runner=runner)],
             [BackButton(runner=runner)], [BackButton(runner=runner)], [BackButton(runner=runner)],
             [MembersButton(runner=runner), SettingButton(runner=runner)],
-            [TextChannelSelectOnMemberStatus(runner=runner), MemberSelect(runner=runner), BackMenuButton(runner=runner)],
+            [TextChannelSelectOnMemberStatus(runner=runner), MemberSelect(runner=runner),
+             BackMenuButton(runner=runner)],
             [BackMembersButton(runner=runner)],
             [BackMembersButton(runner=runner)]
         ])
@@ -347,10 +348,11 @@ class Runner(base.Runner):
                     results = cur.fetchall()
                     if len(results) == 0:
                         cur.execute(
-                            'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp, prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                            'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp,'
+                            ' prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                             (self.chosen_channel.id, self.interval, new_time_utc, next_datetime,
                              next_datetime - self.interval, next_datetime - self.interval * 2,
-                            [_member.id for _member in interaction.message.channel.members])
+                             [_member.id for _member in interaction.message.channel.members])
                         )
                         self.database_connector.commit()
                     else:
@@ -389,7 +391,8 @@ class Runner(base.Runner):
                     results = cur.fetchall()
                     if len(results) == 0:
                         cur.execute(
-                            'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp, prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                            'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp,'
+                            ' prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                             (self.chosen_channel.id, self.interval, new_time_utc, next_datetime,
                              next_datetime - self.interval, next_datetime - self.interval * 2,
                              [_member.id for _member in interaction.message.channel.members])
@@ -448,7 +451,7 @@ class Runner(base.Runner):
             else:
                 with self.database_connector.cursor() as cur:
                     cur.execute(
-                        'SELECT * FROM progress WHERE channel_id = %s', (channel.id, )
+                        'SELECT * FROM progress WHERE channel_id = %s', (channel.id,)
                     )
                     results = cur.fetchall()
                 if len(results) == 0:
@@ -460,7 +463,8 @@ class Runner(base.Runner):
                     if self.chosen_member_on_member_status in channel.members:
                         with self.database_connector.cursor() as cur:
                             cur.execute(
-                                'SELECT total, streak, escape, denied, hp, kick FROM progress_members WHERE channel_id = %s AND user_id = %s',
+                                'SELECT score, total, streak, escape, denied FROM progress_members'
+                                ' WHERE channel_id = %s AND user_id = %s',
                                 (channel.id, self.chosen_member_on_member_status.id)
                             )
                             results = cur.fetchall()
@@ -470,18 +474,19 @@ class Runner(base.Runner):
                             self.progress_window.embed_dict['title'] = '{0}さんは'
                             await self.progress_window.response_edit(interaction=interaction)
                         elif len(results) == 1:
-                            total, streak, escape, denied, hp, kick = results[0]
+                            score, total, streak, escape, denied = results[0]
                             self.progress_window.set_pattern(pattern_id=ProgressWindow.WindowID.MEMBER_STATUS)
-                            self.progress_window.embed_dict['title'] = '*{}*'.format(self.chosen_member_on_member_status.name)
+                            self.progress_window.embed_dict['title'] = '*{}*'.format(
+                                self.chosen_member_on_member_status.name)
                             self.progress_window.embed_dict['thumbnail'] = {
                                 'url': self.chosen_member_on_member_status.display_avatar.url}
                             self.progress_window.embed_dict['fields'] = [
+                                {'name': '今月のスコア', 'value': '{}'.format(score)},
                                 {'name': '報告回数', 'value': '{}回'.format(total)},
-                                {'name': '現在の連続日数', 'value': '{}日'.format(streak)},
+                                {'name': '連続報告日数', 'value': '{}日'.format(max(streak, 0))},
                                 {'name': '報告忘れ回数', 'value': '{}回'.format(escape)},
                                 {'name': '却下された回数', 'value': '{}回'.format(denied)},
-                                {'name': 'Kickされるまでの残り回数', 'value': '{}回'.format(hp)},
-                                {'name': 'Kickされた回数', 'value': '{}回'.format(kick)}
+                                {'name': '連続報告失敗日数', 'value': '{}日'.format(max(-streak, 0))}
                             ]
                             await self.progress_window.response_edit(interaction=interaction)
                         else:
@@ -504,26 +509,31 @@ class Runner(base.Runner):
 class Progress(base.Command):
     def __init__(self, bot: discord.ext.commands.Bot):
         super().__init__(bot=bot)
-        self.printer.start()
-        print(self.printer.next_iteration)
+        self.tally_progress_periodically.start()
+        print(self.tally_progress_periodically.next_iteration)
         self.parser.add_argument('comment')
 
+        # Databaseの初期化
         self.database_connector = psycopg2.connect(DATABASE_URL)
         with self.database_connector.cursor() as cur:
             cur.execute(
-                'CREATE TABLE IF NOT EXISTS progress (channel_id BIGINT, interval INTERVAL, time TIME, timestamp TIMESTAMPTZ, prev_timestamp TIMESTAMPTZ, prev_prev_timestamp TIMESTAMPTZ, member_ids BIGINT[])')
+                'CREATE TABLE IF NOT EXISTS progress (channel_id BIGINT, interval INTERVAL, time TIME,'
+                ' timestamp TIMESTAMPTZ, prev_timestamp TIMESTAMPTZ, prev_prev_timestamp TIMESTAMPTZ,'
+                ' PRIMARY KEY (channel_id))')
             self.database_connector.commit()
         self.change_printer_interval()
 
         with self.database_connector.cursor() as cur:
             cur.execute(
-                'CREATE TABLE IF NOT EXISTS progress_members (channel_id BIGINT, user_id BIGINT, total INTEGER, streak INTEGER, escape INTEGER, denied INTEGER, hp INTEGER, kick INTEGER)'
+                'CREATE TABLE IF NOT EXISTS progress_members (channel_id BIGINT, user_id BIGINT, score INTEGER,'
+                ' total INTEGER, streak INTEGER, escape INTEGER, denied INTEGER, PRIMARY KEY (channel_id, user_id))'
             )
             self.database_connector.commit()
 
         with self.database_connector.cursor() as cur:
             cur.execute(
-                'CREATE TABLE IF NOT EXISTS progress_reports (channel_id BIGINT, message_id BIGINT, timestamp TIMESTAMPTZ)'
+                'CREATE TABLE IF NOT EXISTS progress_reports (channel_id BIGINT, user_id BIGINT, message_id BIGINT,'
+                ' timestamp TIMESTAMPTZ, PRIMARY KEY (channel_id, user_id, message_id))'
             )
             self.database_connector.commit()
 
@@ -537,22 +547,15 @@ class Progress(base.Command):
         for _time in new_time:
             print(_time.tzinfo)
             print(_time)
-        self.printer.change_interval(time=new_time)
-        self.printer.restart()
-        print(self.printer.time)
-
-    def calc_status(self, member: discord.Member):
-        with self.database_connector.cursor() as cur:
-            cur.execute(
-                'SELECT channel_id, timestamp, prev_timestamp, prev_prev_timestamp FROM progress WHERE %s IN member_ids',
-                (member.id,)
-            )
+        self.tally_progress_periodically.change_interval(time=new_time)
+        self.tally_progress_periodically.restart()
+        print(self.tally_progress_periodically.time)
 
     @commands.command()
     async def progress(self, ctx: commands.Context, *args):
         print('progress was called.')
-        print('printer next iteration is {}'.format(self.printer.next_iteration))
-        print(self.printer.time)
+        print('printer next iteration is {}'.format(self.tally_progress_periodically.next_iteration))
+        print(self.tally_progress_periodically.time)
         try:
             namespace = self.parser.parse_args(args=args)
         except base.commandparser.InputInsufficientRequiredArgumentError:
@@ -574,17 +577,19 @@ class Progress(base.Command):
                 )
                 self.database_connector.commit()
 
+    # 進捗を集計する。設定した時刻に呼ばれる。
     @tasks.loop(time=DEFAULT_TIMES)
-    async def printer(self):
-        print('printer was called.')
+    async def tally_progress_periodically(self):
+        print('tally progress.')
         now = datetime.datetime.now(tz=ZONE_UTC)
         with self.database_connector.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(
-                'SELECT channel_id, interval, time, timestamp, prev_timestamp, prev_prev_timestamp, member_ids FROM progress')
+                'SELECT channel_id, interval, time, timestamp, prev_timestamp, prev_prev_timestamp FROM progress')
             results = cur.fetchall()
             self.database_connector.commit()
 
-        for channel_id, interval, _time, timestamp, prev_timestamp, prev_prev_timestamp, member_ids in results:
+        # 登録されているprogressごとに集計する。
+        for channel_id, interval, _time, timestamp, prev_timestamp, prev_prev_timestamp in results:
             timestamp = timestamp.astimezone(tz=ZONE_UTC)
             prev_timestamp = prev_timestamp.astimezone(tz=ZONE_UTC)
             prev_prev_timestamp = prev_prev_timestamp.astimezone(tz=ZONE_UTC)
@@ -595,29 +600,44 @@ class Progress(base.Command):
             if now + datetime.timedelta(minutes=1) < timestamp:
                 continue
             channel = self.bot.get_channel(channel_id)
+            # 登録されているchannelが存在しなかったらそのprogressを削除する。
             if channel is None:
+                with self.database_connector.cursor() as cur:
+                    cur.execute(
+                        'DELETE FROM progress WHERE channel_id = %s', channel_id
+                    )
+                    self.database_connector.commit()
                 continue
 
+            # progressに登録されているメンバーを取得
+            with self.database_connector.cursor() as cur:
+                cur.execute(
+                    'SELECT user_id FROM progress_members WHERE channel_id = %s',
+                    channel_id
+                )
+                user_ids = cur.fetchall()
+                self.database_connector.commit()
 
             print(channel.name)
+            # progressに参加しているかつchannelに所属しているmemberを取得
             members = [member for member in channel.members if
-                       member.id in member_ids and member.id is not self.bot.user.id]
+                       member.id in [user_id[0] for user_id in user_ids] and member.id is not self.bot.user.id]
             print([member.name for member in members])
 
             embeds = []
             # 前回のreportの検証
             approved: dict[int, int] = {member.id: 0 for member in members}
             denied: dict[int, int] = {member.id: 0 for member in members}
-            kick_members = []
+            # 前回の期間内の進捗報告を取得
             with self.database_connector.cursor() as cur:
                 cur.execute(
-                    'SELECT message_id, user_id FROM progress_reports WHERE channel_id = %s AND %s <= timestamp AND timestamp < %s',
+                    'SELECT message_id, user_id FROM progress_reports'
+                    ' WHERE channel_id = %s AND %s <= timestamp AND timestamp < %s',
                     (channel_id, prev_prev_timestamp, prev_timestamp)
                 )
                 results = cur.fetchall()
                 self.database_connector.commit()
-            print(len(results))
-            print(channel_id)
+            # 取得した進捗報告を集計
             for message_id, user_id in results:
                 try:
                     message = await channel.fetch_message(message_id)
@@ -646,42 +666,37 @@ class Progress(base.Command):
             with self.database_connector.cursor() as cur:
                 for member in members:
                     cur.execute(
-                        'SELECT streak, hp FROM progress_members WHERE channel_id = %s AND user_id = %s',
+                        'SELECT streak FROM progress_members WHERE channel_id = %s AND user_id = %s',
                         (channel_id, member.id)
                     )
                     result = cur.fetchone()
                     if result is None:
                         continue
                     else:
-                        streak, hp = result
+                        streak, = result
                     if approved[member.id] > 0:
+                        # 承認された進捗報告があったとき
                         cur.execute(
-                            'UPDATE progress_members SET total = total + %s, streak = streak + 1, denied = denied + %s, hp = hp + %s WHERE channel_id = %s AND user_id = %s',
+                            'UPDATE progress_members SET score = score + %s, total = total + %s, streak = %s,'
+                            ' denied = denied + %s WHERE channel_id = %s AND user_id = %s',
                             (
-                                approved[member.id], denied[member.id],
-                                1 if (streak + 1) % HEAL_HP_PER_STREAK == 0 else 0, channel_id, member.id
+                                approved[member.id] * 100 - denied[member.id] * 50 + streak, approved[member.id],
+                                max(streak + 1, 1), denied[member.id], channel_id, member.id
                             )
                         )
                         self.database_connector.commit()
                     else:
-                        if hp - 1 <= 0:
-                            kick_members.append(member)
-                            next_hp = MAX_HP
-                            next_kick = 1
-                        else:
-                            next_hp = hp - 1
-                            next_kick = 0
                         if denied[member.id] > 0:
+                            # 承認された報告がなく、かつ却下された進捗報告があったとき
                             cur.execute(
-                                'UPDATE progress_members SET streak = 0, denied = denied + %s, hp = %s, kick = kick + %s WHERE channel_id = %s AND user_id = %s',
-                                (denied[member.id], next_hp, next_kick, channel_id, member.id)
+                                'UPDATE progress_members SET score = score + %s, streak = %s, denied = denied + %s'
+                                ' WHERE channel_id = %s AND user_id = %s',
+                                (-denied[member.id] * 50 + streak, min(streak - 1, -1), denied[member.id], channel_id,
+                                 member.id)
                             )
                             self.database_connector.commit()
                         else:
-                            cur.execute(
-                                'UPDATE progress_members SET streak = 0, escape = escape + 1, hp = %s, kick = kick + %s WHERE channel_id = %s AND user_id = %s',
-                                (next_hp, next_kick, channel_id, member.id)
-                            )
+                            # 進捗報告がなかったとき 前日の時点で集計済み
                             self.database_connector.commit()
             print('approved')
             print(approved)
@@ -719,7 +734,8 @@ class Progress(base.Command):
             reports: dict[int, int] = {member.id: 0 for member in members}
             with self.database_connector.cursor() as cur:
                 cur.execute(
-                    'SELECT message_id, user_id FROM progress_reports WHERE channel_id = %s AND %s <= timestamp AND timestamp < %s',
+                    'SELECT message_id, user_id FROM progress_reports '
+                    'WHERE channel_id = %s AND %s <= timestamp AND timestamp < %s',
                     (channel_id, prev_timestamp, timestamp)
                 )
                 results = cur.fetchall()
@@ -735,29 +751,6 @@ class Progress(base.Command):
                 else:
                     if user_id in [member.id for member in members]:
                         reports[user_id] += 1
-
-            # kick
-            if len(kick_members) > 0:
-                invite = await channel.create_invite(reason='進捗報告を怠ったためにKickしたため。')
-                member_names = ''
-                failed = []
-                for member in kick_members:
-                    print(member.name)
-                    member_names = '{0} {1}'.format(member_names, member.name)
-                    try:
-                        await member.kick(reason='進捗報告を怠ったため。')
-                    except discord.Forbidden:
-                        failed.append(member)
-                    else:
-                        await member.send(content=invite.url)
-                embed = discord.Embed(title='Good Bye!!', description=member_names, colour=discord.Colour.red())
-                embed.set_thumbnail(url=ROLLING_ON_THE_FLOOR_LAUGHING.url)
-                if len(failed) > 0:
-                    failed_names = failed[0].name
-                    for i in range(1, len(failed)):
-                        failed_names = '{0}, {1}'.format(failed_names, failed[i])
-                    embed.add_field(name='権限不足でKickできなかったメンバー', value=failed_names)
-                embeds.append(embed)
 
             next_timestamp = calc_nearest_datetime(now, _time.replace(tzinfo=ZONE_UTC)) + interval
 
@@ -786,7 +779,8 @@ class Progress(base.Command):
                     'DELETE FROM progress_reports WHERE timestamp < %s', (prev_prev_timestamp,)
                 )
                 cur.execute(
-                    'UPDATE progress SET timestamp = %s, prev_timestamp = %s, prev_prev_timestamp = %s WHERE channel_id = %s',
+                    'UPDATE progress SET timestamp = %s, prev_timestamp = %s, prev_prev_timestamp = %s '
+                    'WHERE channel_id = %s',
                     (next_timestamp, timestamp, prev_timestamp, channel_id)
                 )
                 self.database_connector.commit()
