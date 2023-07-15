@@ -604,7 +604,7 @@ class Progress(base.Command):
             if channel is None:
                 with self.database_connector.cursor() as cur:
                     cur.execute(
-                        'DELETE FROM progress WHERE channel_id = %s', channel_id
+                        'DELETE FROM progress WHERE channel_id = %s', (channel_id,)
                     )
                     self.database_connector.commit()
                 continue
@@ -613,7 +613,7 @@ class Progress(base.Command):
             with self.database_connector.cursor() as cur:
                 cur.execute(
                     'SELECT user_id FROM progress_members WHERE channel_id = %s',
-                    channel_id
+                    (channel_id,)
                 )
                 user_ids = cur.fetchall()
                 self.database_connector.commit()
