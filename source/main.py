@@ -349,10 +349,9 @@ class Runner(base.Runner):
                     if len(results) == 0:
                         cur.execute(
                             'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp,'
-                            ' prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                            ' prev_prev_timestamp) VALUES (%s, %s, %s, %s, %s, %s)',
                             (self.chosen_channel.id, self.interval, new_time_utc, next_datetime,
-                             next_datetime - self.interval, next_datetime - self.interval * 2,
-                             [_member.id for _member in interaction.message.channel.members])
+                             next_datetime - self.interval, next_datetime - self.interval * 2)
                         )
                         self.database_connector.commit()
                     else:
@@ -392,10 +391,9 @@ class Runner(base.Runner):
                     if len(results) == 0:
                         cur.execute(
                             'INSERT INTO progress (channel_id, interval, time, timestamp, prev_timestamp,'
-                            ' prev_prev_timestamp, member_ids) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                            ' prev_prev_timestamp) VALUES (%s, %s, %s, %s, %s, %s)',
                             (self.chosen_channel.id, self.interval, new_time_utc, next_datetime,
-                             next_datetime - self.interval, next_datetime - self.interval * 2,
-                             [_member.id for _member in interaction.message.channel.members])
+                             next_datetime - self.interval, next_datetime - self.interval * 2)
                         )
                         self.database_connector.commit()
                     else:
@@ -618,11 +616,12 @@ class Progress(base.Command):
                 user_ids = cur.fetchall()
                 self.database_connector.commit()
 
-            print(channel.name)
+            print(user_ids)
+            print('Channel name: {}'.format(channel.name))
             # progressに参加しているかつchannelに所属しているmemberを取得
             members = [member for member in channel.members if
                        member.id in [user_id[0] for user_id in user_ids] and member.id is not self.bot.user.id]
-            print([member.name for member in members])
+            print('Member name: {}'.format([member.name for member in members]))
 
             embeds = []
             # 前回のreportの検証
@@ -714,6 +713,10 @@ class Progress(base.Command):
                     title='進捗報告承認!!', description=names, colour=discord.Colour.green()
                 )
                 embed.set_thumbnail(url=PARTY_POPPER.url)
+                embed.set_footer(text='{0}から{1}まで'.format(
+                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分'),
+                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分')
+                ))
                 embeds.append(embed)
 
             if 0 < max(denied.values()):
@@ -728,6 +731,10 @@ class Progress(base.Command):
                     title='進捗報告却下', description=names, colour=discord.Colour.red()
                 )
                 embed.set_thumbnail(url=INNOCENT.url)
+                embed.set_footer(text='{0}から{1}まで'.format(
+                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分'),
+                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分')
+                ))
                 embeds.append(embed)
 
             # 今回のreportの検証
@@ -769,6 +776,20 @@ class Progress(base.Command):
                 embed = discord.Embed(title='全員報告済み!!', colour=discord.Colour.blue())
                 embed.set_thumbnail(url=PARTY_FACE.url)
                 embeds.append(embed)
+
+            # スコア　ランキング
+            with self.database_connector.cursor() as cur:
+                cur.execute(
+                    'SELECT user_id, score FROM progress_members WHERE channel_id = %s and user_id = ANY(%s) '
+                    'ORDER BY score DESC LIMIT 3', (channel_id, [member.id for member in members])
+                )
+                results = cur.fetchall()
+                self.database_connector.commit()
+            embed = discord.Embed(title='現在のスコア　ランキング')
+            for i in range(len(results)):
+                embed.add_field(name='{}位: {}'.format(i + 1, channel.guild.get_member(results[i][0]).name),
+                                value='{}'.format(results[i][1]))
+            embeds.append(embed)
 
             await channel.send(embeds=embeds)
 
