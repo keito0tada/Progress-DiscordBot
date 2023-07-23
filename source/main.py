@@ -204,6 +204,15 @@ class BackMenuButton(discord.ui.Button):
         await self.runner.back_menu(interaction=interaction)
 
 
+class JoinProgress(discord.ui.Button):
+    def __init__(self, runner: 'Runner'):
+        super().__init__(label='参加する', style=discord.ButtonStyle.primary)
+        self.runner = runner
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+
 class BackMembersButton(discord.ui.Button):
     def __init__(self, runner: 'Runner'):
         super().__init__(label='戻る', style=discord.ButtonStyle.secondary)
@@ -273,7 +282,7 @@ class ProgressWindow(base.Window):
             [TextChannelSelectOnMemberStatus(runner=runner), MemberSelect(runner=runner),
              BackMenuButton(runner=runner)],
             [BackMembersButton(runner=runner)],
-            [BackMembersButton(runner=runner)]
+            [JoinProgress(runner=runner), BackMembersButton(runner=runner)]
         ])
 
 
@@ -469,7 +478,8 @@ class Runner(base.Runner):
                             self.database_connector.commit()
                         if len(results) == 0:
                             self.progress_window.set_pattern(pattern_id=ProgressWindow.WindowID.ERROR_ON_MEMBER_STATUS)
-                            self.progress_window.embed_dict['title'] = '{0}さんは'
+                            self.progress_window.embed_dict['title'] = '{0}さんは# {1}のprogressに参加していません'.format(
+                                self.chosen_member_on_member_status.name, channel.name)
                             await self.progress_window.response_edit(interaction=interaction)
                         elif len(results) == 1:
                             score, total, streak, escape, denied = results[0]
