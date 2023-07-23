@@ -210,6 +210,15 @@ class JoinProgress(discord.ui.Button):
         self.runner = runner
 
     async def callback(self, interaction: discord.Interaction):
+        await self.runner.join(interaction)
+
+
+class LeaveProgress(discord.ui.Button):
+    def __init__(self, runner: 'Runner'):
+        super().__init__(label='離脱する', style=discord.ButtonStyle.link)
+        self.runner = runner
+
+    async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
 
@@ -281,6 +290,7 @@ class ProgressWindow(base.Window):
             [MembersButton(runner=runner), SettingButton(runner=runner)],
             [TextChannelSelectOnMemberStatus(runner=runner), MemberSelect(runner=runner),
              BackMenuButton(runner=runner)],
+            [LeaveProgress(runner=runner), BackMembersButton(runner=runner)],
             [BackMembersButton(runner=runner)],
             [JoinProgress(runner=runner), BackMembersButton(runner=runner)]
         ])
@@ -491,10 +501,10 @@ class Runner(base.Runner):
                             self.progress_window.embed_dict['fields'] = [
                                 {'name': '今月のスコア', 'value': '{}'.format(score)},
                                 {'name': '報告回数', 'value': '{}回'.format(total)},
-                                {'name': '連続報告日数', 'value': '{}日'.format(max(streak, 0))},
+                                {'name': '報告連続日数', 'value': '{}日'.format(max(streak, 0))},
                                 {'name': '報告忘れ回数', 'value': '{}回'.format(escape)},
                                 {'name': '却下された回数', 'value': '{}回'.format(denied)},
-                                {'name': '連続報告失敗日数', 'value': '{}日'.format(max(-streak, 0))}
+                                {'name': '報告無し連続日数', 'value': '{}日'.format(max(-streak, 0))}
                             ]
                             await self.progress_window.response_edit(interaction=interaction)
                         else:
@@ -511,6 +521,29 @@ class Runner(base.Runner):
 
     async def back_members(self, interaction: discord.Interaction):
         self.progress_window.set_pattern(pattern_id=ProgressWindow.WindowID.MEMBERS)
+        await self.progress_window.response_edit(interaction=interaction)
+
+    async def join(self, interaction: discord.Interaction):
+        with self.database_connector.cursor() as cur:
+            cur.execute(
+                'INSERT INTO progress_members (channel_id, user_id, total, streak, escape, denied, score)'
+                ' VALUES (%s, %s, 0, 0, 0, 0, 0)', (
+                    self.chosen_channel_on_member_status.id, self.chosen_member_on_member_status
+                )
+            )
+            self.database_connector.commit()
+        self.progress_window.set_pattern(pattern_id=ProgressWindow.WindowID.MEMBER_STATUS)
+        await self.progress_window.response_edit(interaction=interaction)
+
+    async def leave(self, interaction: discord.Interaction):
+        with self.database_connector.cursor() as cur:
+            cur.execute(
+                'DELETE FROM progress_members WHERE channel_id = %s AND user_id = %s', (
+                    self.chosen_channel_on_member_status.id, self.chosen_member_on_member_status.id
+                )
+            )
+            self.database_connector.commit()
+        self.progress_window.set_pattern(pattern_id=ProgressWindow.WindowID.ERROR_ON_MEMBER_STATUS)
         await self.progress_window.response_edit(interaction=interaction)
 
 
