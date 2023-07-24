@@ -720,7 +720,7 @@ class Progress(base.Command):
                             'UPDATE progress_members SET score = score + %s, total = total + %s, streak = %s,'
                             ' denied = denied + %s WHERE channel_id = %s AND user_id = %s',
                             (
-                                approved[member.id] * 100 - denied[member.id] * 50 + streak, approved[member.id],
+                                approved[member.id] * 100 - denied[member.id] * 50 + streak * 10, approved[member.id],
                                 max(streak + 1, 1), denied[member.id], channel_id, member.id
                             )
                         )
@@ -731,7 +731,7 @@ class Progress(base.Command):
                             cur.execute(
                                 'UPDATE progress_members SET score = score + %s, streak = %s, denied = denied + %s'
                                 ' WHERE channel_id = %s AND user_id = %s',
-                                (-denied[member.id] * 50 + streak, min(streak - 1, -1), denied[member.id], channel_id,
+                                (-denied[member.id] * 50 + streak * 10, min(streak - 1, -1), denied[member.id], channel_id,
                                  member.id)
                             )
                             self.database_connector.commit()
