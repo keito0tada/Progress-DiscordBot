@@ -215,7 +215,7 @@ class JoinProgress(discord.ui.Button):
 
 class LeaveProgress(discord.ui.Button):
     def __init__(self, runner: 'Runner'):
-        super().__init__(label='離脱する', style=discord.ButtonStyle.link)
+        super().__init__(label='離脱する', style=discord.ButtonStyle.danger)
         self.runner = runner
 
     async def callback(self, interaction: discord.Interaction):
@@ -277,8 +277,7 @@ class ProgressWindow(base.Window):
              'description': '設定したチャンネルに進捗報告があるか監視します。指定した期間内に報告がない場合はメンションが飛びます。また一定回数報告がない場合はこのサーバーからKickされます。'},
             {'title': '進捗報告　状況', 'description': 'メンバーの進捗報告状況が確認できます。'},
             {'title': 'member name'},
-            {'title': 'エラー', 'color': discord.Colour.orange().value},
-            {'title': '{0}は進捗報告のメンバーに登録されていません。', 'color': discord.Colour.orange().value}
+            {'title': 'エラー', 'color': discord.Colour.orange().value}
         ], view_patterns=[
             [SettingChannelSelect(runner=runner), BackMenuButton(runner=runner)],
             [IntervalDaysSelect(runner=runner), HourSelect(runner=runner), MinuteSelect(runner=runner),
@@ -291,7 +290,6 @@ class ProgressWindow(base.Window):
             [TextChannelSelectOnMemberStatus(runner=runner), MemberSelect(runner=runner),
              BackMenuButton(runner=runner)],
             [LeaveProgress(runner=runner), BackMembersButton(runner=runner)],
-            [BackMembersButton(runner=runner)],
             [JoinProgress(runner=runner), BackMembersButton(runner=runner)]
         ])
 
@@ -528,7 +526,7 @@ class Runner(base.Runner):
             cur.execute(
                 'INSERT INTO progress_members (channel_id, user_id, total, streak, escape, denied, score)'
                 ' VALUES (%s, %s, 0, 0, 0, 0, 0)', (
-                    self.chosen_channel_on_member_status.id, self.chosen_member_on_member_status
+                    self.channel.id, self.chosen_member_on_member_status
                 )
             )
             self.database_connector.commit()
@@ -539,7 +537,7 @@ class Runner(base.Runner):
         with self.database_connector.cursor() as cur:
             cur.execute(
                 'DELETE FROM progress_members WHERE channel_id = %s AND user_id = %s', (
-                    self.chosen_channel_on_member_status.id, self.chosen_member_on_member_status.id
+                    self.channel.id, self.chosen_member_on_member_status.id
                 )
             )
             self.database_connector.commit()
@@ -775,8 +773,8 @@ class Progress(base.Command):
                 )
                 embed.set_thumbnail(url=INNOCENT.url)
                 embed.set_footer(text='{0}から{1}まで'.format(
-                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分'),
-                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分')
+                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%Y年%m月%d日%H時%M分'),
+                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%Y年%m月%d日%H時%M分')
                 ))
                 embeds.append(embed)
 
@@ -824,7 +822,7 @@ class Progress(base.Command):
             with self.database_connector.cursor() as cur:
                 cur.execute(
                     'SELECT user_id, score FROM progress_members WHERE channel_id = %s and user_id = ANY(%s) '
-                    'ORDER BY score DESC LIMIT 3', (channel_id, [member.id for member in members])
+                    'ORDER BY score DESC LIMIT 25', (channel_id, [member.id for member in members])
                 )
                 results = cur.fetchall()
                 self.database_connector.commit()
