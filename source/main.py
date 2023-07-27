@@ -545,6 +545,10 @@ class Runner(base.Runner):
         await self.progress_window.response_edit(interaction=interaction)
 
 
+def calc_score(approved: int, denied: int, streak: int):
+    return approved * 100 - denied * 50 + streak * 10
+
+
 class Progress(base.Command):
     def __init__(self, bot: discord.ext.commands.Bot):
         super().__init__(bot=bot)
@@ -668,6 +672,7 @@ class Progress(base.Command):
             # 前回のreportの検証
             approved: dict[int, int] = {member.id: 0 for member in members}
             denied: dict[int, int] = {member.id: 0 for member in members}
+            deleted: list[int] = []
             # 前回の期間内の進捗報告を取得
             with self.database_connector.cursor() as cur:
                 cur.execute(
@@ -682,6 +687,7 @@ class Progress(base.Command):
                 try:
                     message = await channel.fetch_message(message_id)
                 except discord.NotFound:
+                    deleted.append(user_id)
                     continue
                 else:
                     if user_id in [member.id for member in members]:
@@ -716,28 +722,42 @@ class Progress(base.Command):
                         streak, = result
                     if approved[member.id] > 0:
                         # 承認された進捗報告があったとき
+                        streak = max(streak + 1, 1)
                         cur.execute(
                             'UPDATE progress_members SET score = score + %s, total = total + %s, streak = %s,'
-                            ' denied = denied + %s WHERE channel_id = %s AND user_id = %s',
-                            (
-                                approved[member.id] * 100 - denied[member.id] * 50 + streak * 10, approved[member.id],
-                                max(streak + 1, 1), denied[member.id], channel_id, member.id
+                            ' denied = denied + %s WHERE channel_id = %s AND user_id = %s', (
+                                calc_score(approved[member.id], denied[member.id], streak), approved[member.id],
+                                streak, denied[member.id], channel_id, member.id
                             )
                         )
                         self.database_connector.commit()
                     else:
                         if denied[member.id] > 0:
                             # 承認された報告がなく、かつ却下された進捗報告があったとき
+                            streak = min(streak - 1, -1)
                             cur.execute(
                                 'UPDATE progress_members SET score = score + %s, streak = %s, denied = denied + %s'
-                                ' WHERE channel_id = %s AND user_id = %s',
-                                (-denied[member.id] * 50 + streak * 10, min(streak - 1, -1), denied[member.id], channel_id,
-                                 member.id)
+                                ' WHERE channel_id = %s AND user_id = %s', (
+                                    calc_score(0, denied[member.id], streak), streak, denied[member.id], channel_id,
+                                    member.id
+                                )
                             )
                             self.database_connector.commit()
                         else:
-                            # 進捗報告がなかったとき 前日の時点で集計済み
-                            self.database_connector.commit()
+                            # 進捗報告がなかった時
+                            if member.id in deleted:
+                                # 進捗報告が削除されていた時
+                                streak = min(streak - 1, -1)
+                                cur.execute(
+                                    'UPDATE progress_members SET score = score + %s, streak = %s, escape = escape + 1'
+                                    ' WHERE channel_id + %s AND user_id = %s', (
+                                          calc_score(0, 0, streak), streak, channel_id, member.id
+                                    )
+                                )
+                                self.database_connector.commit()
+                            else:
+                                # 進捗報告がなかったとき 前日の時点で集計済み
+                                self.database_connector.commit()
             print('approved')
             print(approved)
             print('denied')
@@ -755,8 +775,8 @@ class Progress(base.Command):
                 )
                 embed.set_thumbnail(url=PARTY_POPPER.url)
                 embed.set_footer(text='{0}から{1}まで'.format(
-                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分'),
-                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%年%m月%d日%H時%M分')
+                    prev_prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%Y年%m月%d日%H時%M分'),
+                    prev_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%Y年%m月%d日%H時%M分')
                 ))
                 embeds.append(embed)
 
@@ -806,8 +826,22 @@ class Progress(base.Command):
             print(reports)
             if 0 in reports.values():
                 mentions = ''
-                for member in [member for member in members if reports[member.id] == 0]:
-                    mentions = '{0} {1}'.format(mentions, member.name)
+                with self.database_connector.cursor() as cur:
+                    for member in [member for member in members if reports[member.id] == 0]:
+                        mentions = '{0} {1}'.format(mentions, member.name)
+                        cur.execute(
+                            'SELECT streak FROM progress_members WHERE channel_id = %s AND user_id = %s', (
+                                channel_id, member.id
+                            )
+                        )
+                        streak, = cur.fetchone()
+                        streak = min(streak - 1, -1)
+                        cur.execute(
+                            'UPDATE progress_members SET score = score + %s, streak = %s, escape = escape + 1'
+                            ' WHERE channel_id = %s AND user_id = %s', (
+                                calc_score(0, 0, streak), streak, channel_id, member.id
+                            )
+                        )
                 embed = discord.Embed(title='進捗どうですか??', description=mentions, colour=discord.Colour.orange())
                 embed.set_footer(
                     text='次回は{}です。'.format(next_timestamp.astimezone(tz=ZONE_TOKYO).strftime('%Y年%m月%d日%H時%M分')))
@@ -826,10 +860,13 @@ class Progress(base.Command):
                 )
                 results = cur.fetchall()
                 self.database_connector.commit()
-            embed = discord.Embed(title='現在のスコア　ランキング')
+            embed = discord.Embed(title='現在のスコア　ランキング', colour=discord.Colour.blurple())
             for i in range(len(results)):
-                embed.add_field(name='{}位: {}'.format(i + 1, channel.guild.get_member(results[i][0]).name),
-                                value='{}'.format(results[i][1]))
+                embed.add_field(
+                    name='{}位: {}'.format(i + 1, channel.guild.get_member(results[i][0]).name),
+                    value='{}'.format(results[i][1]),
+                    inline=False
+                )
             embeds.append(embed)
 
             await channel.send(embeds=embeds)
