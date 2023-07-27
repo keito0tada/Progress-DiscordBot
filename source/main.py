@@ -695,7 +695,7 @@ class Progress(base.Command):
                             reaction for reaction in message.reactions if type(
                                 reaction.emoji) == str and reaction.emoji == THINKING_FACE.text]
                         if len(reactions) == 1:
-                            if reactions[0].count < len(members) / 2:
+                            if reactions[0].count - 1 <= len(members) / 2:
                                 approved[user_id] += 1
                                 embed_dict = message.embeds[0].to_dict()
                                 embed_dict['thumbnail'] = {'url': CHECK_MARK_BUTTON.url}
