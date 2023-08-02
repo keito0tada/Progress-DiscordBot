@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 import discord
 import psycopg2
 import psycopg2.extras
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from .UtilityClasses_DiscordBot import base
@@ -620,7 +621,9 @@ class Progress(base.Command):
                 )
                 self.database_connector.commit()
 
-    @discord.app_commands.command()
+    @discord.app_commands.command(description='進捗報告ができます。')
+    @app_commands.describe(context='進捗内容', description='進捗内容の詳細', image='大きく表示する画像のURL',
+                           thumbnail='小さく表示する画像のURL')
     async def report(self, interaction: discord.Interaction, context: str, description: Optional[str],
                      image: Optional[str], thumbnail: Optional[str]):
         author = interaction.user
@@ -629,8 +632,10 @@ class Progress(base.Command):
         )
         embed.set_author(name=author.name, icon_url=author.display_avatar.url)
         embed.set_footer(text='進捗報告')
-        embed.set_thumbnail(url=thumbnail)
-        embed.set_image(url=image)
+        if thumbnail is not None:
+            embed.set_thumbnail(url=thumbnail)
+        if image is not None:
+            embed.set_image(url=image)
         await interaction.response.send_message(embed=embed)
         message = await interaction.original_response()
         await message.add_reaction('\N{thinking face}')
