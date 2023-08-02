@@ -620,6 +620,27 @@ class Progress(base.Command):
                 )
                 self.database_connector.commit()
 
+    @discord.app_commands.command()
+    async def report(self, interaction: discord.Interaction, context: str, description: Optional[str],
+                     image: Optional[str], thumbnail: Optional[str]):
+        author = interaction.user
+        embed = discord.Embed(
+            title=context, description=description
+        )
+        embed.set_author(name=author.name, icon_url=author.display_avatar.url)
+        embed.set_footer(text='進捗報告')
+        embed.set_thumbnail(url=thumbnail)
+        embed.set_image(url=image)
+        await interaction.response.send_message(embed=embed)
+        message = await interaction.original_response()
+        await message.add_reaction('\N{thinking face}')
+        with self.database_connector.cursor() as cur:
+            cur.execute(
+                'INSERT INTO progress_reports (channel_id, message_id, user_id, timestamp) VALUES (%s, %s, %s, %s)',
+                (interaction.channel.id, message.id, author.id, message.created_at)
+            )
+            self.database_connector.commit()
+
     # 進捗を集計する。設定した時刻に呼ばれる。
     @tasks.loop(time=DEFAULT_TIMES)
     async def tally_progress_periodically(self):
